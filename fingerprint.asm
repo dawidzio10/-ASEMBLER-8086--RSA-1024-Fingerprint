@@ -1,21 +1,21 @@
 assume cs:code1, ds:data1, ss:stack1
-
 data1 segment
+argslength			db 16 dup(0)																				;OK Ograniczenie do 16 argumentow
+argscounter			dw 0																						;OK
 args 				db 128 dup('$')																				;OK Maksymalnie moze byc 127 bajtów argumentow
-first				db "W pierwszym argumencie podajemy tylko 0 lub 1!$"										;OK
-second  			db "Liczby hexadecymalne zapisujemy za pomoc cyfr [0;9] i liter [a;f]!$"					;OK
+noargs				db "Nie podano argumentow!$"																;OK					
 onlyone				db "Podano tylko jeden argument!$"									 						;OK
-noargs				db "Nie podano argumentow!$"																;OK
 toomuchargs			db "Podano za duzo argumentow!$"															;OK
 toolongfirsta 		db "Za dlugi pierwszy argument!$"															;OK
-tooshortfirsta		db "Za krotki pierwszy argument!$"															;OK
 toolongseconda 		db "Za dlugi drugi argument!$"  															;OK
 tooshortseconda		db "Za krotki drugi argument!$" 															;OK
-bin					db 64 dup(0)																				;OK wszystkie ruchy w dobrej kolejnosci 128 bitow/4=64
+first				db "W pierwszym argumencie podajemy tylko 0 lub 1!$"										;OK
+second  			db "Liczby hexadecymalne zapisujemy za pomoc cyfr [0;9] i liter [a;f]!$"					;OK
+bin					db 64 dup(0)																				;OK
 mapa				db 153 dup(0)																				;OK
+pozkon				db 0																						;OK
 znaki				db " .o+=*BOX@%&#/^SE"																		;OK
 linia				db "+-----------------+",0ah,0dh,"$"														;OK
-pozkon				db 0																						;OK
 data1 ends
 
 code1 segment
@@ -27,59 +27,30 @@ start:
 	mov ss, ax
 	mov sp, offset wsk
 
+	mov ah,62h
+	int 21h
+	mov es,bx
 
-	mov bl,byte ptr es:[80h]
-	cmp bl,0
-	je noargss
-
-	xor cx,cx
 	xor di,di
-
 	mov bl,81h; od znaku spacji szukamy niebiałych znakow
 petla:
-	jmp findnotwhite ;zwraca w bl niebiały znak
-kopiuj:
-	jmp copytowhite ;pobiera z bl niebiały znak i kopiuje do args a w di zwraca do ktorego miejsca skopiowal, cx zwraca nr (od 0) kopiowanego argumentu
-kontpetle:
-	cmp cx,2
-	ja petla
-	push di ; wrzucam (pozycje dla pierwszych dwoch arg) do ktorego skopiowal na stos
-	jmp petla
+	call findnotwhite ;zwraca w bl niebiały znak
+	call copytowhite ;pobiera z bl niebiały znak, zwraca w di - ostatnie miejsce w args do ktorego skopiowano
 
-koniecpetli:
-	cmp cx,2
-	ja check
-	push di
-
-check:
-	pop di 
-	mov dx,di ; dlugosc 1 i 2 argumentu + dwa dolary
-	pop di 
-	mov bx,di ; dlugosc 1 arg + dolar
-
-	jmp checkargs
-checked:
-	jmp hextobin
-hexed:
-	mov dl,byte ptr ds:[args]
-	cmp dl,'0'
-	je moveverone
-	cmp dl,'1'
-	je movevertwo
-moved:
-	jmp drawmap	
+	call checkargs
+	call hextobin
+	call checkver
+	call drawmap
 quit:
 	mov ah,4ch
 	int 21h
-
-
 ;****************************************
 ;******wyszukiwanie niebialego znaku*****
 ;****************************************
 ;input bl - adres od ktorego szuka 
 ;output bl - adres pierwszego niebialego znaku
 
-findnotwhite:
+findnotwhite proc
 	push dx
 	xor bh,bh
 comp1:
@@ -96,16 +67,21 @@ white:
 
 foundnotwhite:
 	pop dx
-	jmp kopiuj
+	ret
+findnotwhite endp
 ;****************************************
 ;******kopiowanie do białego znkau*******
 ;****************************************
 ;input bl - adres od ktorego kopiuje 
-;output di - pozycja do ktorej jest uzyte args, bl adres nastepnego bialego znaku, cx ilosc skopiowanych argumentow
+;output bl - adres nastepnego bialego znaku, di do którego miejsca uzyte args
 
-copytowhite:
+copytowhite proc
 	push dx
+	push si
+	
 	xor bh,bh
+
+	mov si,argscounter
 
 copy:
 	mov dl,byte ptr es:[bx]
@@ -118,38 +94,42 @@ copy:
 	je konieckopiowania
 
 	mov byte ptr ds:[args+di],dl
+	inc argslength[si]
 	inc di
 	inc bl
 	jmp copy
 
 brcopy:
-	mov [args+di],'$'
-	inc cx
+	mov byte ptr ds:[args+di],'.'
 	inc di
-	pop dx
-	jmp kontpetle
+	inc argscounter
+	jmp petla
 
 konieckopiowania:
-	mov [args+di],'$'
-	inc cx
+	mov byte ptr ds:[args+di],'$'
 	inc di
-	pop dx
-	jmp koniecpetli
+	inc argscounter
 
+
+	pop si
+	pop dx
+	ret
+copytowhite endp
 ;****************************************
 ;******sprawdzanie poprawnosci arg*******
 ;****************************************
-;input dx,bx - dlugosci argumentow, cx - ilosc argumentow
 
-checkargs:
-
+checkargs proc
 	push ax
 	push di
 
-	cmp cx,1
+	cmp byte ptr es:[80h],0
+	je noargss
+	cmp argscounter,1
 	je onlyones
-	cmp cx,2
+	cmp argscounter,2
 	ja toomuchargss
+
 	jmp checklength
 
 	noargss:
@@ -166,15 +146,10 @@ checkargs:
 
 checklength:
 
-	sub dx,bx
-	dec dx ; dlugosc 2 argumentu (odejmuje dolara)
-	dec bx ; dlugosc 1 argumentu (odejmuje dolara)
-
-	cmp bx,1
+	cmp argslength[0],1
 	ja toolongfirst
-	jb tooshortfirst
 
-	cmp dx,32
+	cmp argslength[1],32
 	ja toolongsecond
 	jb tooshortsecond
 
@@ -183,9 +158,6 @@ checklength:
 toolongfirst:
 	mov dx,offset ds:[toolongfirsta]
 	jmp wypiszblad
-tooshortfirst:
-	mov dx,offset ds:[tooshortfirsta]
-	jmp wypiszblad	
 toolongsecond:
 	mov dx,offset ds:[toolongseconda]
 	jmp wypiszblad
@@ -204,8 +176,6 @@ wrongfirst:
 	mov dx,offset ds:[first]
 	jmp wypiszblad
 
-
-
 checksecond:
 	mov di,2
 
@@ -217,46 +187,30 @@ przesuwaj:
 
 	inc di
 
-	cmp dl,'1'
-	je przesuwaj
-	cmp dl,'2'
-	je przesuwaj
-	cmp dl,'3'
-	je przesuwaj	
-	cmp dl,'4'
-	je przesuwaj
-	cmp dl,'5'
-	je przesuwaj
-	cmp dl,'6'
-	je przesuwaj
-	cmp dl,'7'
-	je przesuwaj
-	cmp dl,'8'
-	je przesuwaj
 	cmp dl,'9'
-	je przesuwaj
-	cmp dl,'0'
-	je przesuwaj		
-	cmp dl,'a'
-	je przesuwaj
-	cmp dl,'b'
-	je przesuwaj
-	cmp dl,'c'
-	je przesuwaj
-	cmp dl,'d'
-	je przesuwaj
-	cmp dl,'e'
-	je przesuwaj
+	jbe cyfry
+
 	cmp dl,'f'
-	je przesuwaj
+	jbe literki	
+
+cyfry:
+	cmp dl,'0'
+	jb wrongsecond
+	jmp przesuwaj
+
+literki:
+	cmp dl,'a'
+	jb wrongsecond
+	jmp przesuwaj
 
 wrongsecond:
 	mov dx,offset ds:[second]
 	jmp wypiszblad
+
 zwroc:
 	pop di
 	pop ax
-	jmp checked
+	ret
 
 wypiszblad:
 	mov ah,9
@@ -264,23 +218,22 @@ wypiszblad:
 	pop di
 	pop ax
 	jmp quit
-
+checkargs endp
 ;****************************************
 ;******zamiana hexa na bity**************
 ;****************************************
-hextobin:
+
+hextobin proc
 	push si
 	push di
 	push cx
 	push dx
 
-	mov si,0
-	mov di,-2
-	mov cx,0
-
+	mov si,0 ;wskaznik na miejsce w arg
+	mov di,-2 ;wskaznik na miejsce w bin
+	mov cx,0 ;ilosc przerobionych ruchow
 
 zamien:
-
 	add di,2
 	cmp cx,32
 	je zamienzwroc
@@ -422,19 +375,38 @@ zamienzwroc:
 	pop cx
 	pop di
 	pop si
-	jmp hexed
+	ret
+hextobin endp
+;****************************************
+;******sprawdz wersje********************
+;****************************************
+checkver proc
+	mov dl,args
+	cmp dl,'0'
+	je vers1
+	cmp dl,'1'
+	je vers2
 
+	vers1:
+	call moveverone
+	ret
+
+	vers2:
+	call movevertwo
+	ret
+
+checkver endp
 ;****************************************
 ;******rusza sie wersja 0****************
 ;****************************************
-moveverone:
+moveverone proc
 push ax
 push bx
-push di
 push dx
+push di
 push si
 
-	mov di,76
+	mov di,76 ;pozycja
 	mov si,-1 ;
 
 ruchvzero:
@@ -445,126 +417,126 @@ ruchvzero:
 	mov dl,byte ptr [bin+si]
 
 	cmp dl,0
-	je zerozerovzero
+	je zerozero
 
 	cmp dl,1
-	je zerojedenvzero
+	je zerojeden
 
 	cmp dl,10
-	je jedenzerovzero
+	je jedenzero
 
 	cmp dl,11
-	je jedenjedenvzero
+	je jedenjeden
 	
-zerozerovzero:
-	cmp di,0
+zerozero:
+	cmp di,0 ; pomijam rog
 	je ruchvzero
 
 	mov ax,di
 	mov bl,17
 	div bl
-	cmp al,0
-	je wierszlvzero
+
+
+	cmp al,0 
+	je wierszl ;slizgam sie w wierszu w lewo
 
 	cmp ah,0
-	je kolumnagvzero
+	je kolumnag ;slizgam sie w kolumnie do gory 
 
 	sub di,18
-	jmp nastepnyruchv0
+	jmp nastepnyruch
 
-zerojedenvzero:
-	cmp di,16
+zerojeden:
+	cmp di,16; pomijam rog
 	je ruchvzero
 
 	mov ax,di
 	mov bl,17
 	div bl
 	cmp al,0
-	je wierszpvzero
+	je wierszp ;slizgam sie w wierszu w prawo
 
 	cmp ah,16
-	je kolumnadvzero
+	je kolumnad ;slizgam sie w kolumnie do dolu 
 
 	sub di,16
-	jmp nastepnyruchv0
+	jmp nastepnyruch
 
 
 
-jedenzerovzero:
-	cmp di,136
+jedenzero:
+	cmp di,136; pomijam rog
 	je ruchvzero
 
 	mov ax,di
 	mov bl,17
 	div bl
 	cmp al,8
-	je wierszlvzero
+	je wierszl ;slizgam sie w wierszu w lewo
 
 	cmp ah,0
-	je kolumnagvzero
+	je kolumnag ;slizgam sie w kolumnie do gory
 
 	add di,16
-	jmp nastepnyruchv0
+	jmp nastepnyruch
 
-jedenjedenvzero:
-	cmp di,152
+jedenjeden:
+	cmp di,152; pomijam rog
 	je ruchvzero
 
 	mov ax,di
 	mov bl,17
 	div bl
 	cmp al,8
-	je wierszpvzero
+	je wierszp ;slizgam sie w wierszu w prawo
 
 	cmp ah,16
-	je kolumnadvzero
+	je kolumnad ;slizgam sie w kolumnie do dolu
 
 	add di,18
-	jmp nastepnyruchv0
+	jmp nastepnyruch
 
 zakonczruchy:
-	xor dx,dx
 	mov dx,di
-	mov [pozkon],dl
+	mov pozkon,dl
 
 	pop si
-	pop dx
 	pop di
+	pop dx
 	pop bx
 	pop ax
-
-	jmp moved
-
-	
+	ret
 
 
-kolumnagvzero:
+kolumnag:
 	sub di,17
-	jmp nastepnyruchv0
+	jmp nastepnyruch
 
-kolumnadvzero:
+kolumnad:
 	add di,17
-	jmp nastepnyruchv0
+	jmp nastepnyruch
 
-wierszlvzero:
+wierszl:
 	sub di,1
-	jmp nastepnyruchv0
+	jmp nastepnyruch
 
-wierszpvzero:
+wierszp:
 	add di,1
-	jmp nastepnyruchv0
+	jmp nastepnyruch
 
-nastepnyruchv0:	
+nastepnyruch:	
 	inc mapa[di]
 	jmp ruchvzero
+moveverone endp
+
 ;****************************************
 ;******rusza sie wersja 0****************
 ;****************************************
-movevertwo:
+movevertwo proc
 push ax
 push bx
-push di
 push dx
+push di
 push si
 
 	mov di,76 ;pozycja
@@ -573,24 +545,24 @@ push si
 ruchvjeden:
 	inc si	
 	cmp si,64
-	je zakonczruchy ;wspolna dla obu wersji
+	je zakonczruchy
 	
 	mov dl,byte ptr [bin+si]
 
 	cmp dl,0
-	je zerozerovjeden
+	je zerozero
 
 	cmp dl,1
-	je zerojedenvjeden
+	je zerojeden
 
 	cmp dl,10
-	je jedenzerovjeden
+	je jedenzero
 
 	cmp dl,11
-	je jedenjedenvjeden
+	je jedenjeden
 	
 
-zerozerovjeden:
+zerozero:
 	cmp di,0
 	je ruchvjeden ; nie wykonuje ruchu
 
@@ -602,18 +574,18 @@ zerozerovjeden:
 	div bl
 
 	cmp al,0 ;dzielenie
-	je wierszlvjeden ; jezeli w 1 linii to przesuwam sie o 2 w lewo
+	je odwal ; jezeli w 1 linii to przesuwam sie o 2 w lewo
 
 	cmp ah,0 ;modulo
-	je kolumnagvjeden ; jezeli w 1 kolumnie to przesuwam sie o jeden do gory
+	je ojedeng ; jezeli w 1 kolumnie to przesuwam sie o jeden do gory
 
 	cmp ah,1 ;modulo
-	je kolumnagojedenvjeden ; jezeli w 2 kolumnie to jeden w lewo i jeden do gory
+	je jedlewjedgor ; jezeli w 2 kolumnie to jeden w lewo i jeden do gory
 
 	sub di,19 ; normalyn ruch skoczka
-	jmp nastepnyruchv1
+	jmp nastepnyruch
 
-zerojedenvjeden:
+zerojeden:
 	cmp di,16
 	je ruchvjeden ; brak ruchu
 
@@ -625,18 +597,18 @@ zerojedenvjeden:
 	div bl
 
 	cmp al,0 ;dzielenie
-	je wierszpvjeden  ;1 linia - dwa w prawo
+	je odwap  ;1 linia - dwa w prawo
 
 	cmp ah,16 ;modulo
-	je kolumnagvjeden ;ostatnia kolumna - przeskakuje o jeden go gory
+	je ojedeng ;ostatnia kolumna - przeskakuje o jeden go gory
 
 	cmp ah,15 ;modulo
-	je kolumnaggojedenvjeden ; przedostatani kolumna - jeden w prawo i jeden w goe
+	je jedprajedgor ; przedostatani kolumna - jeden w prawo i jeden w goe
 
 	sub di,15 ; normalny ruch
-	jmp nastepnyruchv1
+	jmp nastepnyruch
 
-jedenzerovjeden:
+jedenzero:
 	cmp di,136
 	je ruchvjeden ;brak ruchu
 
@@ -649,19 +621,19 @@ jedenzerovjeden:
 
 
 	cmp al,8 ;dzielenie
-	je wierszlvjeden ; ruch o dwa w lewo w ostatnim wierszu
+	je odwal ; ruch o dwa w lewo w ostatnim wierszu
 
 	cmp ah,0 ;modulo
-	je kolumnadvjeden ; ruch o jeden do gory 
+	je ojedend; ruch o jeden do dolu 
 
 	cmp ah,1 ;modulo
-	je kolumnaddojedenvjeden ; ruch jeden w lewo i jeden w dol
+	je jedlewjeddol ; ruch jeden w lewo i jeden w dol
 
 
 	add di,15
-	jmp nastepnyruchv1
+	jmp nastepnyruch
 
-jedenjedenvjeden:
+jedenjeden:
 	cmp di,152
 	je ruchvjeden ;pomijam
 
@@ -673,66 +645,77 @@ jedenjedenvjeden:
 	div bl
 
 
-	cmp al,8 ;dzielenei
-	je wierszpvjeden ;w ostatnim wierszu slizga sie o dwa w prawo
+	cmp al,8 ;dzielenie
+	je odwap ;w ostatnim wierszu slizga sie o dwa w prawo
 
 	cmp ah,16 ;modulo
-	je kolumnadvjeden ; o jeden w dol
+	je ojedend ; o jeden w dol
 
 	cmp ah,15 ;modulo
-	je kolumnadojedenvjeden ;ruch jeden w prawo jeden w dol
+	je jedprajeddol ;ruch jeden w prawo jeden w dol
 
 	add di,19 ;normalny ruch
-	jmp nastepnyruchv1
+	jmp nastepnyruch
 
 
 ojedenl:
 	sub di,1
-	jmp nastepnyruchv1
-
+	jmp nastepnyruch
 ojedenp:
 	add di,1
-	jmp nastepnyruchv1
-
-wierszlvjeden:
+	jmp nastepnyruch
+odwal:
 	sub di,2
-	jmp nastepnyruchv1
-
-wierszpvjeden:
+	jmp nastepnyruch
+odwap:
 	add di,2
-	jmp nastepnyruchv1
+	jmp nastepnyruch
 
 
-kolumnaggojedenvjeden:
+jedprajedgor:
 	sub di,16
-	jmp nastepnyruchv1
-kolumnagvjeden:
+	jmp nastepnyruch
+ojedeng:
 	sub di,17
-	jmp nastepnyruchv1
-kolumnagojedenvjeden:
+	jmp nastepnyruch
+jedlewjedgor:
 	sub di,18
-	jmp nastepnyruchv1
+	jmp nastepnyruch
 
 
-kolumnaddojedenvjeden:
+jedlewjeddol:
 	add di,16
-	jmp nastepnyruchv1
-kolumnadvjeden:
+	jmp nastepnyruch
+ojedend:
 	add di,17
-	jmp nastepnyruchv1
-kolumnadojedenvjeden:
+	jmp nastepnyruch
+jedprajeddol:
 	add di,18
-	jmp nastepnyruchv1
+	jmp nastepnyruch
 
-nastepnyruchv1:
+nastepnyruch:
 	inc mapa[di]
 	jmp ruchvjeden
 
+	zakonczruchy:
+	xor dx,dx
+	mov dx,di
+	mov pozkon,dl
+
+	pop si
+	pop di
+	pop dx
+	pop bx
+	pop ax
+	ret
+movevertwo endp
 ;****************************************
 ;******rysuj mape************************
 ;****************************************
-drawmap:
+drawmap proc
 	push ax
+	push bx
+	push cx
 	push dx
 	push di
 	push si
@@ -742,11 +725,11 @@ drawmap:
 	mov ah,9
 	mov dx,offset linia
 	int 21h
-	mov ah,2
 
-	mov di,0 ;ktore miejsce na mapie
-	mov si,0 ;wrzucam wartosc tego miejsca
-	mov cx,0 ;licze ilosc wypisanych znakow w linii
+	mov ah,2
+	xor di,di ;ktore miejsce na mapie
+	xor si,si ;wrzucam wartosc tego miejsca
+	xor cx,cx ;licze ilosc wypisanych znakow w linii
 
 petlarysuj:
 	mov dl,'|'
@@ -756,11 +739,8 @@ rysujznak:
 	mov si,bx
 	cmp di,76
 	je znakstartu ; wrzucam S na miejsce startu
-	push ax
-	mov al,byte ptr pozkon
-	xor ah,ah
-	cmp di,ax
-	pop ax
+	mov bl,byte ptr pozkon
+	cmp di,bx
 	je znakkonca ; wrzucam E na miejsce konca
 	cmp si,14
 	ja ostatniznak ;jezeli wartosc miejsca>14
@@ -769,8 +749,6 @@ cor:
 	int 21h
 	inc di ; przesuwam sie na nastepne miejsce na mapie
 	inc cx ; inkrementuje wypisane znaki w linni
-	cmp di,152
-	ja zakonczrysowanie
 	cmp cx,17
 	je nowalinia
 	
@@ -784,23 +762,21 @@ nowalinia:
 	int 21h
 	mov dl,0dh ;powrot karetki
 	int 21h
+	cmp di,153
+	je zakonczrysowanie
 jmp petlarysuj
 
 zakonczrysowanie:
-	mov dl,'|'
-	int 21h
-	mov dl,0ah
-	int 21h
-	mov dl,0dh
-	int 21h
 	mov ah,9
 	mov dx,offset linia
 	int 21h
 	pop si
 	pop di
 	pop dx
+	pop cx
+	pop bx
 	pop ax
-	jmp quit
+	ret
 
 ostatniznak:
 mov si,14
@@ -814,12 +790,12 @@ znakkonca:
 mov si,16
 jmp cor	
 
+drawmap endp
+
 code1 ends
 
 stack1 segment stack
 		dw 200 dup(?)
 	wsk dw ?
 stack1 ends
-
 end start
-
